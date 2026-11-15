@@ -80,7 +80,7 @@ jobs:
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$ASSET_NAME" --clobber
-            gh release edit "$TAG" --title "$TITLE" --prerelease --notes "$NOTES"
+            gh release edit "$TAG" --title "$TITLE" --prerelease --notes "$NOTES" --target "$GITHUB_SHA"
           else
             gh release create "$TAG" "$ASSET_NAME" \
               --title "$TITLE" \
