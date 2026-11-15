@@ -47,6 +47,7 @@ import app.lawnchair.ui.preferences.components.controls.SwitchPreference
 import app.lawnchair.ui.preferences.components.layout.ExpandAndShrink
 import app.lawnchair.ui.preferences.components.layout.PreferenceGroup
 import app.lawnchair.ui.preferences.components.layout.PreferenceLayout
+import app.lawnchair.ui.preferences.navigation.AnimatedWallpaper
 import app.lawnchair.ui.preferences.navigation.HomeScreenGrid
 import app.lawnchair.util.collectAsStateBlocking
 import com.android.launcher3.LauncherAppState
@@ -165,6 +166,11 @@ fun HomeScreenPreferences(
             )
         }
         PreferenceGroup(heading = stringResource(id = R.string.wallpaper)) {
+            NavigationActionPreference(
+                label = stringResource(id = R.string.animated_wallpaper_label),
+                destination = AnimatedWallpaper,
+                subtitle = stringResource(id = R.string.animated_wallpaper_summary),
+            )
             SwitchPreference(
                 prefs.wallpaperScrolling.getAdapter(),
                 label = stringResource(id = R.string.wallpaper_scrolling_label),

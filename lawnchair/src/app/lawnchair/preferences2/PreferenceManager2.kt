@@ -54,6 +54,7 @@ import app.lawnchair.ui.preferences.components.HiddenAppsInSearch
 import app.lawnchair.ui.preferences.data.liveinfo.LiveInformationManager
 import app.lawnchair.util.kotlinxJson
 import app.lawnchair.views.overlay.FullScreenOverlayMode
+import app.lawnchair.wallpaper.animated.AnimatedWallpaperQuality
 import com.android.launcher3.BuildConfig
 import com.android.launcher3.InvariantDeviceProfile
 import com.android.launcher3.InvariantDeviceProfile.INDEX_DEFAULT
@@ -808,6 +809,40 @@ class PreferenceManager2 @Inject constructor(
         key = booleanPreferencesKey(name = "enable_wallpaper_depth_effect"),
         defaultValue = true,
         onSet = { reloadHelper.recreate() },
+    )
+
+    val animatedWallpaperEnabled = preference(
+        key = booleanPreferencesKey(name = "animated_wallpaper_enabled"),
+        defaultValue = false,
+    )
+
+    /** Absolute path of the private copy created by `AnimatedWallpaperSource`. */
+    val animatedWallpaperSource = preference(
+        key = stringPreferencesKey(name = "animated_wallpaper_source"),
+        defaultValue = "",
+    )
+
+    /** MIME type of the selected image or video, used to choose the correct decoder. */
+    val animatedWallpaperMimeType = preference(
+        key = stringPreferencesKey(name = "animated_wallpaper_mime_type"),
+        defaultValue = "",
+    )
+
+    val animatedWallpaperQuality = preference(
+        key = stringPreferencesKey(name = "animated_wallpaper_quality"),
+        defaultValue = AnimatedWallpaperQuality.BALANCED,
+        parse = AnimatedWallpaperQuality::fromPreference,
+        save = { it.name },
+    )
+
+    val animatedWallpaperPauseOnPowerSave = preference(
+        key = booleanPreferencesKey(name = "animated_wallpaper_pause_on_power_save"),
+        defaultValue = true,
+    )
+
+    val animatedWallpaperPauseOnLowBattery = preference(
+        key = booleanPreferencesKey(name = "animated_wallpaper_pause_on_low_battery"),
+        defaultValue = true,
     )
 
     val deckLayout = preference(

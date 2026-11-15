@@ -1,0 +1,90 @@
+name: Animated wallpaper CI and prerelease
+
+on:
+  push:
+    branches:
+      - arena/4b59f318-lawnchair
+  pull_request:
+    branches:
+      - 16-dev
+  workflow_dispatch:
+
+concurrency:
+  group: animated-wallpaper-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    name: Build, test and check style
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - uses: actions/setup-java@v6
+        with:
+          distribution: zulu
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-encryption-key: Da25KUVSE5jbGds2zXmfXw==
+      - name: Build and verify
+        run: ./gradlew spotlessCheck testLawnWithQuickstepGithubDebugUnitTest assembleLawnWithQuickstepGithubDebug
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: animated-wallpaper-apk
+          path: build/outputs/apk/**/*.apk
+          if-no-files-found: error
+
+  publish-prerelease:
+    name: Publish prerelease
+    needs: build
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/arena/4b59f318-lawnchair')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      TAG: animated-wallpaper-ci
+      TITLE: Animated wallpaper CI
+      ASSET_NAME: Lawnchair.AnimatedWallpaper.CI.apk
+      NOTES: |
+        Automated build of the animated wallpaper feature branch.
+
+        Commit: `${{ github.sha }}`
+        Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: animated-wallpaper-apk
+          path: artifacts/apk
+      - name: Rename APK
+        run: |
+          APK_PATH="$(find artifacts/apk -type f -name '*.apk' -print -quit)"
+          if [ -z "$APK_PATH" ]; then
+            echo "No APK found in downloaded artifact" >&2
+            exit 1
+          fi
+          mv "$APK_PATH" "$ASSET_NAME"
+      - name: Create or update prerelease
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ASSET_NAME" --clobber
+            gh release edit "$TAG" --title "$TITLE" --prerelease --notes "$NOTES" --target "$GITHUB_SHA"
+          else
+            gh release create "$TAG" "$ASSET_NAME" \
+              --title "$TITLE" \
+              --prerelease \
+              --notes "$NOTES" \
+              --target "$GITHUB_SHA"
+          fi

@@ -750,6 +750,34 @@
     <string name="wallpaper_depth_effect_description">Zoom in and out of the wallpaper when transitioning between areas of the launcher</string>
     <string name="show_sys_ui_scrim">Top shadow</string>
 
+    <string name="animated_wallpaper_label">Animated wallpaper</string>
+    <string name="animated_wallpaper_summary">High-quality animated images and videos that pause to save battery</string>
+    <string name="animated_wallpaper_description">An animated image or muted video shown as a live wallpaper. Lawnchair freezes one frame when the wallpaper is hidden, the screen is off, or the battery needs saving.</string>
+    <string name="animated_wallpaper_battery_description">Animation only runs while the wallpaper is visible and the screen is on. Videos are muted and loop; a frozen frame stops decoding and uses no repaint loop.</string>
+    <string name="animated_wallpaper_enable">Enable animated wallpaper</string>
+    <string name="animated_wallpaper_enable_description">Play the selected image or muted video. When disabled, a still frame stays as the wallpaper.</string>
+    <string name="animated_wallpaper_source_group">Source</string>
+    <string name="animated_wallpaper_choose_file">Choose image or video</string>
+    <string name="animated_wallpaper_no_file">No file selected</string>
+    <string name="animated_wallpaper_file_selected">File selected</string>
+    <string name="animated_wallpaper_activate">Set as live wallpaper</string>
+    <string name="animated_wallpaper_activate_description">Select Lawnchair animated wallpaper in the system wallpaper picker.</string>
+    <string name="animated_wallpaper_clear_file">Remove selected file</string>
+    <string name="animated_wallpaper_clear_file_confirmation">Remove the stored animated wallpaper file?</string>
+    <string name="animated_wallpaper_file_type_error">Please choose an image or video file.</string>
+    <string name="animated_wallpaper_file_error">Could not read the selected file.</string>
+    <string name="animated_wallpaper_picker_error">Could not open the wallpaper picker.</string>
+    <string name="animated_wallpaper_requires_android_p">Animated images require Android 9 or newer. Videos play on this device; on Android 8 the first frame of an animated image is shown as a still wallpaper.</string>
+    <string name="animated_wallpaper_quality_group">Quality and battery</string>
+    <string name="animated_wallpaper_quality">Quality preset</string>
+    <string name="animated_wallpaper_quality_description">Higher presets keep more detail in frozen frames and allow more frequent animated-image repaints.</string>
+    <string name="animated_wallpaper_quality_high">High quality</string>
+    <string name="animated_wallpaper_quality_balanced">Balanced</string>
+    <string name="animated_wallpaper_quality_battery_saver">Battery saver</string>
+    <string name="animated_wallpaper_pause_power_save">Pause in Battery Saver</string>
+    <string name="animated_wallpaper_pause_low_battery">Pause on low battery</string>
+    <string name="animated_wallpaper_pause_low_battery_description">Show a frozen frame below the preset battery threshold unless the device is charging.</string>
+
     <string name="infinite_scrolling_label">Infinite scrolling</string>
     <string name="infinite_scrolling_description">Swipe to loop between the first and last pages</string>
 

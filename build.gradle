@@ -301,6 +301,11 @@ android {
             }
         }
 
+        test {
+            java.srcDirs = ['unit_tests/src']
+            kotlin.directories.addAll('unit_tests/src')
+        }
+
         lawn {
             java.srcDirs = ['src_flags', 'src_shortcuts_overrides', 'lawnchair/src', 'tests/shared']
             kotlin.directories.addAll('src_flags', 'src_shortcuts_overrides', 'lawnchair/src', 'tests/shared')
@@ -495,6 +500,8 @@ dependencies {
     implementation libs.google.guava
 
     implementation libs.androidx.exifinterface
+
+    testImplementation libs.junit
 
     debugImplementation libs.leakcanary.android
     debugImplementation libs.leakcanary.androidstudio
