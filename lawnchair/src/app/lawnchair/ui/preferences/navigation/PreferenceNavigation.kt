@@ -25,6 +25,7 @@ import app.lawnchair.ui.preferences.components.colorpreference.ColorPreferenceMo
 import app.lawnchair.ui.preferences.components.colorpreference.ColorSelection
 import app.lawnchair.ui.preferences.components.search.SearchProviderId
 import app.lawnchair.ui.preferences.components.search.SearchProviderPreferenceScreen
+import app.lawnchair.ui.preferences.destinations.AnimatedWallpaperPreferences
 import app.lawnchair.ui.preferences.destinations.AppDrawerFoldersPreference
 import app.lawnchair.ui.preferences.destinations.AppDrawerPreferences
 import app.lawnchair.ui.preferences.destinations.BackupAndRestorePreference
@@ -146,6 +147,9 @@ fun PreferenceNavigation(
         composable<HomeScreenGrid>(
             deepLinks = getDeepLink(HomeScreenGrid),
         ) { HomeScreenGridPreferences() }
+        composable<AnimatedWallpaper>(
+            deepLinks = getDeepLink(AnimatedWallpaper),
+        ) { AnimatedWallpaperPreferences() }
         composable<HomeScreenPopupEditor>(
             deepLinks = getDeepLink(HomeScreenPopupEditor),
         ) { LauncherPopupPreference() }

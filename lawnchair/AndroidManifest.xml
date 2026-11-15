@@ -143,6 +143,19 @@
         </receiver>
 
         <service
+            android:name="app.lawnchair.wallpaper.animated.AnimatedWallpaperService"
+            android:exported="true"
+            android:label="@string/animated_wallpaper_label"
+            android:permission="android.permission.BIND_WALLPAPER">
+            <intent-filter>
+                <action android:name="android.service.wallpaper.WallpaperService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.wallpaper"
+                android:resource="@xml/animated_wallpaper" />
+        </service>
+
+        <service
             android:name="app.lawnchair.LawnchairAccessibilityService"
             android:exported="false"
             android:label="@string/derived_app_name"
