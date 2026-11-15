@@ -822,6 +822,12 @@ class PreferenceManager2 @Inject constructor(
         defaultValue = "",
     )
 
+    /** MIME type of the selected image or video, used to choose the correct decoder. */
+    val animatedWallpaperMimeType = preference(
+        key = stringPreferencesKey(name = "animated_wallpaper_mime_type"),
+        defaultValue = "",
+    )
+
     val animatedWallpaperQuality = preference(
         key = stringPreferencesKey(name = "animated_wallpaper_quality"),
         defaultValue = AnimatedWallpaperQuality.BALANCED,

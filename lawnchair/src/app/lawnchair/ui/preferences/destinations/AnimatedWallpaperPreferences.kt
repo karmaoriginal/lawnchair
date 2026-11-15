@@ -60,6 +60,7 @@ fun AnimatedWallpaperPreferences(
     val scope = rememberCoroutineScope()
     val enabledAdapter = prefs2.animatedWallpaperEnabled.getAdapter()
     val sourceAdapter = prefs2.animatedWallpaperSource.getAdapter()
+    val mimeTypeAdapter = prefs2.animatedWallpaperMimeType.getAdapter()
     val qualityAdapter = prefs2.animatedWallpaperQuality.getAdapter()
     val enabled by enabledAdapter
     val sourcePath by sourceAdapter
@@ -67,18 +68,21 @@ fun AnimatedWallpaperPreferences(
     val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
         val uri = result.data?.data ?: return@rememberLauncherForActivityResult
-        val mimeType = context.contentResolver.getType(uri)
-        if (mimeType?.startsWith("image/") != true) {
+        val mimeType = context.contentResolver.getType(uri).orEmpty()
+        val isSupported = mimeType.startsWith("image/", ignoreCase = true) ||
+            mimeType.startsWith("video/", ignoreCase = true)
+        if (!isSupported) {
             Toast.makeText(context, R.string.animated_wallpaper_file_type_error, Toast.LENGTH_SHORT).show()
             return@rememberLauncherForActivityResult
         }
         scope.launch {
             val path = withContext(Dispatchers.IO) {
-                AnimatedWallpaperSource.store(context.applicationContext, uri)
+                AnimatedWallpaperSource.store(context.applicationContext, uri, mimeType)
             }
             if (path == null) {
                 Toast.makeText(context, R.string.animated_wallpaper_file_error, Toast.LENGTH_SHORT).show()
             } else {
+                mimeTypeAdapter.onChange(mimeType)
                 sourceAdapter.onChange(path)
                 enabledAdapter.onChange(true)
             }
@@ -87,17 +91,10 @@ fun AnimatedWallpaperPreferences(
     val pickIntent = remember {
         Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = "image/*"
+            type = "*/*"
             putExtra(
                 Intent.EXTRA_MIME_TYPES,
-                arrayOf(
-                    "image/gif",
-                    "image/webp",
-                    "image/png",
-                    "image/jpeg",
-                    "image/heif",
-                    "image/avif",
-                ),
+                arrayOf("image/*", "video/*"),
             )
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
@@ -142,6 +139,7 @@ fun AnimatedWallpaperPreferences(
                         confirmationText = stringResource(id = R.string.animated_wallpaper_clear_file_confirmation),
                         onClick = {
                             AnimatedWallpaperSource.clear(context.applicationContext)
+                            mimeTypeAdapter.onChange("")
                             sourceAdapter.onChange("")
                             enabledAdapter.onChange(false)
                         },

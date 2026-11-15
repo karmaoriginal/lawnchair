@@ -98,6 +98,63 @@ data class AnimatedWallpaperRect(
     val bottom: Int,
 )
 
+/** Media-type helpers that stay free of Android types so they can run in JVM unit tests. */
+object AnimatedWallpaperMedia {
+    private const val IMAGE_MAX_BYTES = 128L * 1024 * 1024
+    private const val VIDEO_MAX_BYTES = 512L * 1024 * 1024
+    private val VIDEO_EXTENSIONS = setOf(
+        "3gp",
+        "3g2",
+        "avi",
+        "m4v",
+        "mkv",
+        "mov",
+        "mp4",
+        "mpeg",
+        "mpg",
+        "ts",
+        "webm",
+    )
+
+    /** Detects a video from its MIME type, falling back to the stored path for older preferences. */
+    fun isVideo(mimeType: String, path: String = ""): Boolean {
+        if (mimeType.startsWith("video/", ignoreCase = true)) return true
+        if (mimeType.startsWith("image/", ignoreCase = true)) return false
+        return path.substringAfterLast('.', "").lowercase() in VIDEO_EXTENSIONS
+    }
+
+    /** Videos need a larger private-copy budget than animated images. */
+    fun maxSourceBytes(mimeType: String, path: String = ""): Long = if (isVideo(mimeType, path)) VIDEO_MAX_BYTES else IMAGE_MAX_BYTES
+
+    /**
+     * Center-crops a source frame to the surface aspect ratio before it is scaled to the quality
+     * preset's render size. This keeps the frozen bitmap inside the pixel budget without stretching
+     * a landscape video onto a portrait screen.
+     */
+    fun centerCropBounds(
+        sourceWidth: Int,
+        sourceHeight: Int,
+        targetWidth: Int,
+        targetHeight: Int,
+    ): AnimatedWallpaperRect {
+        if (sourceWidth <= 0 || sourceHeight <= 0 || targetWidth <= 0 || targetHeight <= 0) {
+            return AnimatedWallpaperRect(0, 0, 0, 0)
+        }
+        val ratio = targetWidth.toDouble() / targetHeight.toDouble()
+        var cropWidth = sourceWidth
+        var cropHeight = (cropWidth / ratio).toInt()
+        if (cropHeight > sourceHeight) {
+            cropHeight = sourceHeight
+            cropWidth = (cropHeight * ratio).toInt()
+        }
+        val width = cropWidth.coerceIn(1, sourceWidth)
+        val height = cropHeight.coerceIn(1, sourceHeight)
+        val left = (sourceWidth - width) / 2
+        val top = (sourceHeight - height) / 2
+        return AnimatedWallpaperRect(left, top, left + width, top + height)
+    }
+}
+
 object AnimatedWallpaperPolicy {
     private const val MAX_SAMPLE_SIZE = 16
     private const val LOW_BATTERY_ADAPTIVE_PERCENT = 40

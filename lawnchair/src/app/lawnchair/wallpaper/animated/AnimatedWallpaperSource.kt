@@ -25,19 +25,18 @@ import java.io.FileOutputStream
 /**
  * Stores the selected image inside the app's private files directory.
  *
- * Keeping a local copy means the wallpaper engine never has to re-open a content provider while
- * decoding, and it keeps working after the one-shot SAF read permission expires. The path stored
- * in preferences is validated against this directory so a restored preference cannot point the
- * engine at an arbitrary file.
+ * Keeping a local copy of an image or video means the wallpaper engine never has to re-open a
+ * content provider while decoding, and it keeps working after the one-shot SAF read permission
+ * expires. The path stored in preferences is validated against this directory so a restored
+ * preference cannot point the engine at an arbitrary file.
  */
 object AnimatedWallpaperSource {
     private const val TAG = "AnimatedWallpaperSource"
     private const val DIRECTORY = "animated_wallpaper"
     private const val FILE_NAME = "current"
     private const val COPY_BUFFER_SIZE = 16 * 1024
-    private const val MAX_SOURCE_BYTES = 128L * 1024 * 1024
 
-    fun store(context: Context, uri: Uri): String? {
+    fun store(context: Context, uri: Uri, mimeType: String): String? {
         var temporary: File? = null
         return try {
             val directory = File(context.filesDir, DIRECTORY)
@@ -47,6 +46,7 @@ object AnimatedWallpaperSource {
             val scratch = File(directory, "$FILE_NAME.tmp")
             temporary = scratch
             val buffer = ByteArray(COPY_BUFFER_SIZE)
+            val maxBytes = AnimatedWallpaperMedia.maxSourceBytes(mimeType, target.absolutePath)
             var copiedBytes = 0L
             input.use { source ->
                 FileOutputStream(scratch).use { destination ->
@@ -54,8 +54,8 @@ object AnimatedWallpaperSource {
                         val read = source.read(buffer)
                         if (read < 0) break
                         copiedBytes += read
-                        if (copiedBytes > MAX_SOURCE_BYTES) {
-                            throw IllegalArgumentException("Animated wallpaper exceeds 128 MiB")
+                        if (copiedBytes > maxBytes) {
+                            throw IllegalArgumentException("Animated wallpaper exceeds the size limit")
                         }
                         destination.write(buffer, 0, read)
                     }

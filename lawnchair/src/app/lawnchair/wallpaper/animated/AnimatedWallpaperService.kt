@@ -31,6 +31,7 @@ import android.graphics.Rect
 import android.graphics.drawable.AnimatedImageDrawable
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import android.media.MediaPlayer
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
@@ -60,13 +61,14 @@ import kotlinx.coroutines.withContext
 private const val TAG = "AnimatedWallpaperService"
 
 /**
- * A live wallpaper that plays animated GIF, WebP, APNG and HEIF images.
+ * A live wallpaper that plays animated GIF, WebP, APNG and HEIF images or a muted local video.
  *
- * The animation is driven by [AnimatedImageDrawable] on the platform RenderThread, so there is no
- * per-frame Java loop. The engine stops that animation and paints one cached bitmap whenever the
- * wallpaper is hidden, the screen is off, Battery Saver is active, or the battery is low. Source
- * frames are decoded once, at a bounded resolution, and surface repaints are paced by the quality
- * preset. A static image is accepted as a still wallpaper.
+ * Animated images are driven by [AnimatedImageDrawable] on the platform RenderThread, while videos
+ * use a [MediaPlayer] hardware decoder; neither needs a per-frame Java loop. The engine stops
+ * playback and paints one cached bitmap whenever the wallpaper is hidden, the screen is off,
+ * Battery Saver is active, or the battery is low. Frozen frames are decoded once at a bounded
+ * resolution, and animated-image repaints are paced by the quality preset. Static images are
+ * accepted as still wallpapers.
  */
 @SuppressLint("NewApi")
 class AnimatedWallpaperService : WallpaperService() {
@@ -86,8 +88,15 @@ class AnimatedWallpaperService : WallpaperService() {
         private var wallpaperVisible = false
         private var sourceAnimated = false
         private var decodeJob: Job? = null
+        private var frameCaptureJob: Job? = null
         private var drawable: Drawable? = null
         private var frozenFrame: Bitmap? = null
+        private var mediaPlayer: MediaPlayer? = null
+        private var videoPlaying = false
+        private var videoSourcePath: String? = null
+        private var videoPositionMs = 0
+        private var videoDurationMs = 0
+        private var isVideoSource = false
         private var lastDrawTimeMs = 0L
         private var frameIntervalMs = Long.MAX_VALUE
         private var playback = AnimatedWallpaperPlayback(
@@ -98,6 +107,7 @@ class AnimatedWallpaperService : WallpaperService() {
         private var config = EngineConfig(
             enabled = false,
             sourcePath = "",
+            mimeType = "",
             quality = AnimatedWallpaperQuality.BALANCED,
             pauseOnPowerSave = true,
             pauseOnLowBattery = true,
@@ -165,6 +175,9 @@ class AnimatedWallpaperService : WallpaperService() {
             if (setSurfaceSize(width, height)) {
                 decodeSource()
             } else {
+                if (videoPlaying) {
+                    mediaPlayer?.let { runCatching { attachVideoPlayer(it, holder) } }
+                }
                 drawFrame(force = true)
             }
         }
@@ -178,6 +191,9 @@ class AnimatedWallpaperService : WallpaperService() {
             super.onSurfaceDestroyed(holder)
             surfaceReady = false
             decodeJob?.cancel()
+            frameCaptureJob?.cancel()
+            saveVideoPosition()
+            releaseVideo()
             releaseDrawable()
         }
 
@@ -189,35 +205,43 @@ class AnimatedWallpaperService : WallpaperService() {
 
         override fun onDestroy() {
             decodeJob?.cancel()
+            frameCaptureJob?.cancel()
             scope.cancel()
             if (receiverRegistered) {
                 runCatching { appContext.unregisterReceiver(stateReceiver) }
                 receiverRegistered = false
             }
+            clearVideoState()
             releaseDrawable()
             surfaceReady = false
             super.onDestroy()
         }
 
         private fun observePreferences() {
+            val pauseFlags = combine(
+                prefs.animatedWallpaperPauseOnPowerSave.get(),
+                prefs.animatedWallpaperPauseOnLowBattery.get(),
+            ) { pauseOnPowerSave, pauseOnLowBattery -> pauseOnPowerSave to pauseOnLowBattery }
             combine(
                 prefs.animatedWallpaperEnabled.get(),
                 prefs.animatedWallpaperSource.get(),
+                prefs.animatedWallpaperMimeType.get(),
                 prefs.animatedWallpaperQuality.get(),
-                prefs.animatedWallpaperPauseOnPowerSave.get(),
-                prefs.animatedWallpaperPauseOnLowBattery.get(),
-            ) { enabled, sourcePath, quality, pauseOnPowerSave, pauseOnLowBattery ->
+                pauseFlags,
+            ) { enabled, sourcePath, mimeType, quality, pauses ->
                 EngineConfig(
                     enabled = enabled,
                     sourcePath = sourcePath,
+                    mimeType = mimeType,
                     quality = quality,
-                    pauseOnPowerSave = pauseOnPowerSave,
-                    pauseOnLowBattery = pauseOnLowBattery,
+                    pauseOnPowerSave = pauses.first,
+                    pauseOnLowBattery = pauses.second,
                 )
             }
                 .distinctUntilChanged()
                 .onEach { newConfig ->
-                    val sourceChanged = newConfig.sourcePath != config.sourcePath
+                    val sourceChanged = newConfig.sourcePath != config.sourcePath ||
+                        newConfig.mimeType != config.mimeType
                     val qualityChanged = newConfig.quality != config.quality
                     config = newConfig
                     if (sourceChanged || qualityChanged) {
@@ -240,19 +264,29 @@ class AnimatedWallpaperService : WallpaperService() {
 
         private fun decodeSource() {
             decodeJob?.cancel()
+            frameCaptureJob?.cancel()
+            saveVideoPosition()
+            releaseVideo()
             val capturedConfig = config
             val sourceFile = AnimatedWallpaperSource.resolve(appContext, capturedConfig.sourcePath)
             if (!surfaceReady || surfaceWidth <= 0 || surfaceHeight <= 0 || sourceFile == null) {
+                clearVideoState()
                 releaseDrawable()
                 drawFrame(force = true)
                 return
             }
             val width = surfaceWidth
             val height = surfaceHeight
+            val video = AnimatedWallpaperMedia.isVideo(capturedConfig.mimeType, capturedConfig.sourcePath)
+            if (video && videoSourcePath != sourceFile.absolutePath) {
+                videoPositionMs = 0
+            }
             decodeJob = scope.launch {
                 val decoded = withContext(Dispatchers.IO) {
                     try {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        if (video) {
+                            DecodedWallpaper.Video(prepareVideoPlayer(sourceFile))
+                        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                             decodeWithImageDecoder(sourceFile, width, height, capturedConfig.quality)
                         } else {
                             decodeStaticDrawable(appContext, sourceFile, width, height, capturedConfig.quality)
@@ -269,32 +303,170 @@ class AnimatedWallpaperService : WallpaperService() {
                     height != surfaceHeight ||
                     !surfaceReady
                 if (stale) {
-                    decoded?.let { disposeDrawable(it.drawable) }
+                    when (decoded) {
+                        is DecodedWallpaper.Image -> disposeDrawable(decoded.drawable)
+                        is DecodedWallpaper.Video -> releaseVideoPlayer(decoded.player)
+                        null -> Unit
+                    }
                     return@launch
                 }
-                releaseDrawable()
-                if (decoded == null) {
-                    drawFrame(force = true)
-                    return@launch
+                when (decoded) {
+                    is DecodedWallpaper.Image -> {
+                        clearVideoState()
+                        releaseDrawable()
+                        drawable = decoded.drawable
+                        sourceAnimated = decoded.animated
+                        isVideoSource = false
+                        if (sourceAnimated && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            prepareAnimatedDrawable(decoded.drawable, drawableCallback)
+                        }
+                        refreshPlayback(force = true)
+                        drawFrame(force = true)
+                    }
+
+                    is DecodedWallpaper.Video -> {
+                        val player = decoded.player
+                        if (player == null) {
+                            clearVideoState()
+                            releaseDrawable()
+                            drawFrame(force = true)
+                            return@launch
+                        }
+                        releaseDrawable()
+                        mediaPlayer = player
+                        videoSourcePath = sourceFile.absolutePath
+                        videoDurationMs = runCatching { player.duration }.getOrDefault(0).coerceAtLeast(0)
+                        videoPositionMs = videoPositionMs.coerceIn(0, videoDurationMs)
+                        isVideoSource = true
+                        sourceAnimated = true
+                        player.setOnErrorListener { _, what, extra ->
+                            Log.w(TAG, "Video wallpaper playback error: $what/$extra")
+                            clearVideoState()
+                            drawFrame(force = true)
+                            true
+                        }
+                        requestFrozenFrame(sourceFile, videoPositionMs, width, height, capturedConfig.quality)
+                        refreshPlayback(force = true)
+                        drawFrame(force = true)
+                    }
+
+                    null -> {
+                        clearVideoState()
+                        releaseDrawable()
+                        drawFrame(force = true)
+                    }
                 }
-                drawable = decoded.drawable
-                sourceAnimated = decoded.animated
-                if (sourceAnimated && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    prepareAnimatedDrawable(decoded.drawable, drawableCallback)
-                }
-                refreshPlayback()
+            }
+        }
+
+        private fun saveVideoPosition() {
+            val player = mediaPlayer ?: return
+            val position = runCatching { player.currentPosition }.getOrDefault(videoPositionMs).coerceAtLeast(0)
+            videoPositionMs = if (videoDurationMs > 0 && position >= videoDurationMs - 250) 0 else position
+        }
+
+        private fun releaseVideo() {
+            videoPlaying = false
+            releaseVideoPlayer(mediaPlayer)
+            mediaPlayer = null
+        }
+
+        private fun clearVideoState() {
+            frameCaptureJob?.cancel()
+            releaseVideo()
+            videoSourcePath = null
+            videoPositionMs = 0
+            videoDurationMs = 0
+            isVideoSource = false
+        }
+
+        private fun startVideo() {
+            val player = mediaPlayer ?: return
+            if (!surfaceReady || videoPlaying) return
+            frameCaptureJob?.cancel()
+            clearSurface()
+            runCatching { attachVideoPlayer(player, surfaceHolder) }
+            if (videoPositionMs > 0) runCatching { player.seekTo(videoPositionMs) }
+            if (runCatching { player.start() }.isSuccess) {
+                videoPlaying = true
+                lastDrawTimeMs = 0L
+            } else {
+                clearVideoState()
                 drawFrame(force = true)
             }
         }
 
-        private fun refreshPlayback() {
+        private fun pauseVideo() {
+            val player = mediaPlayer ?: return
+            if (!videoPlaying) return
+            saveVideoPosition()
+            runCatching { player.pause() }
+            runCatching { player.setDisplay(null) }
+            videoPlaying = false
+            val path = videoSourcePath ?: return
+            requestFrozenFrame(File(path), videoPositionMs, surfaceWidth, surfaceHeight, config.quality)
+        }
+
+        private fun requestFrozenFrame(
+            file: File,
+            positionMs: Int,
+            width: Int,
+            height: Int,
+            quality: AnimatedWallpaperQuality,
+        ) {
+            frameCaptureJob?.cancel()
+            val capturedPath = file.absolutePath
+            frameCaptureJob = scope.launch {
+                val bitmap = withContext(Dispatchers.IO) {
+                    captureVideoFrame(file, positionMs, width, height, quality)
+                }
+                if (bitmap == null) return@launch
+                if (!isVideoSource || videoSourcePath != capturedPath || videoPlaying || !surfaceReady) {
+                    bitmap.recycle()
+                    return@launch
+                }
+                setFrozenFrame(bitmap)
+                drawFrame(force = true)
+            }
+        }
+
+        private fun setFrozenFrame(bitmap: Bitmap) {
+            frozenFrame?.takeIf { !it.isRecycled }?.recycle()
+            frozenFrame = bitmap
+        }
+
+        private fun clearSurface() {
+            if (!surfaceReady) return
+            val canvas = try {
+                surfaceHolder.lockCanvas()
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not lock the wallpaper surface", e)
+                return
+            }
+            try {
+                canvas.drawColor(Color.BLACK)
+            } finally {
+                try {
+                    surfaceHolder.unlockCanvasAndPost(canvas)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not unlock the wallpaper surface", e)
+                }
+            }
+        }
+
+        private fun refreshPlayback(force: Boolean = false) {
             val device = readDeviceState()
+            val animated = if (isVideoSource) {
+                true
+            } else {
+                sourceAnimated && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+            }
             val state = AnimatedWallpaperState(
                 enabled = config.enabled,
                 visible = wallpaperVisible,
                 screenOn = device.screenOn,
                 powerSaveMode = device.powerSaveMode,
-                sourceAnimated = sourceAnimated && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P,
+                sourceAnimated = animated,
                 batteryPercent = device.batteryPercent,
                 charging = device.charging,
                 pauseOnPowerSave = config.pauseOnPowerSave,
@@ -304,14 +476,18 @@ class AnimatedWallpaperService : WallpaperService() {
             val previous = playback
             playback = decision
             frameIntervalMs = decision.frameIntervalMs
-            if (previous == decision) return
+            if (previous == decision && !force) return
             if (decision.animate) {
-                drawable?.let {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) startAnimatedDrawable(it)
+                if (isVideoSource) {
+                    startVideo()
+                } else {
+                    drawable?.let {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) startAnimatedDrawable(it)
+                    }
                 }
                 drawFrame(force = true)
             } else {
-                freezeFrame()
+                if (isVideoSource) pauseVideo() else freezeFrame()
                 drawFrame(force = true)
             }
         }
@@ -340,10 +516,15 @@ class AnimatedWallpaperService : WallpaperService() {
             )
             try {
                 val bitmap = Bitmap.createBitmap(size.width, size.height, Bitmap.Config.ARGB_8888)
-                current.setBounds(0, 0, size.width, size.height)
+                val bounds = coverRect(
+                    sourceWidth = current.intrinsicWidth,
+                    sourceHeight = current.intrinsicHeight,
+                    viewWidth = size.width,
+                    viewHeight = size.height,
+                )
+                current.setBounds(bounds.left, bounds.top, bounds.right, bounds.bottom)
                 current.draw(Canvas(bitmap))
-                frozenFrame?.takeIf { !it.isRecycled }?.recycle()
-                frozenFrame = bitmap
+                setFrozenFrame(bitmap)
             } catch (e: OutOfMemoryError) {
                 Log.w(TAG, "Could not allocate a frozen wallpaper frame", e)
             } catch (e: Exception) {
@@ -355,6 +536,7 @@ class AnimatedWallpaperService : WallpaperService() {
         }
 
         private fun drawFrame(force: Boolean) {
+            if (videoPlaying) return
             if (!surfaceReady || surfaceWidth <= 0 || surfaceHeight <= 0) return
             val now = SystemClock.uptimeMillis()
             val shouldDraw = force || (
@@ -458,7 +640,7 @@ private fun decodeWithImageDecoder(
     surfaceWidth: Int,
     surfaceHeight: Int,
     quality: AnimatedWallpaperQuality,
-): DecodedWallpaper {
+): DecodedWallpaper.Image {
     val source = ImageDecoder.createSource(file)
     var headerAnimated = false
     val decoded = ImageDecoder.decodeDrawable(source) { decoder, info, _ ->
@@ -478,7 +660,7 @@ private fun decodeWithImageDecoder(
             decoder.setMemorySizePolicy(ImageDecoder.MEMORY_POLICY_LOW_RAM)
         }
     }
-    return DecodedWallpaper(
+    return DecodedWallpaper.Image(
         drawable = decoded,
         animated = headerAnimated && decoded is AnimatedImageDrawable,
     )
@@ -490,7 +672,7 @@ private fun decodeStaticDrawable(
     surfaceWidth: Int,
     surfaceHeight: Int,
     quality: AnimatedWallpaperQuality,
-): DecodedWallpaper {
+): DecodedWallpaper.Image {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeFile(file.absolutePath, bounds)
     val sample = AnimatedWallpaperPolicy.decodeSampleSize(
@@ -506,7 +688,7 @@ private fun decodeStaticDrawable(
     }
     val bitmap = BitmapFactory.decodeFile(file.absolutePath, options)
         ?: throw IllegalStateException("Could not decode wallpaper image")
-    return DecodedWallpaper(
+    return DecodedWallpaper.Image(
         drawable = BitmapDrawable(context.resources, bitmap),
         animated = false,
     )
@@ -543,10 +725,16 @@ private fun disposeDrawable(drawable: Drawable) {
     (drawable as? BitmapDrawable)?.bitmap?.takeIf { !it.isRecycled }?.recycle()
 }
 
-private data class DecodedWallpaper(
-    val drawable: Drawable,
-    val animated: Boolean,
-)
+private sealed interface DecodedWallpaper {
+    data class Image(
+        val drawable: Drawable,
+        val animated: Boolean,
+    ) : DecodedWallpaper
+
+    data class Video(
+        val player: MediaPlayer?,
+    ) : DecodedWallpaper
+}
 
 private data class DeviceState(
     val screenOn: Boolean,
@@ -558,6 +746,7 @@ private data class DeviceState(
 private data class EngineConfig(
     val enabled: Boolean,
     val sourcePath: String,
+    val mimeType: String,
     val quality: AnimatedWallpaperQuality,
     val pauseOnPowerSave: Boolean,
     val pauseOnLowBattery: Boolean,

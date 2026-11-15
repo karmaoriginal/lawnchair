@@ -214,4 +214,52 @@ class AnimatedWallpaperPolicyTest {
             AnimatedWallpaperQuality.fromPreference("not-a-preset"),
         )
     }
+
+    @Test
+    fun mediaDetectionSupportsMimeTypesAndExtensions() {
+        assertTrue(AnimatedWallpaperMedia.isVideo("video/mp4", ""))
+        assertTrue(AnimatedWallpaperMedia.isVideo("", "clip.WEBM"))
+        assertFalse(AnimatedWallpaperMedia.isVideo("image/gif", "clip.webm"))
+        assertFalse(AnimatedWallpaperMedia.isVideo("", "image.gif"))
+    }
+
+    @Test
+    fun videoSourcesAllowLargerPrivateCopies() {
+        assertEquals(
+            128L * 1024 * 1024,
+            AnimatedWallpaperMedia.maxSourceBytes("image/gif", ""),
+        )
+        assertEquals(
+            512L * 1024 * 1024,
+            AnimatedWallpaperMedia.maxSourceBytes("video/mp4", ""),
+        )
+    }
+
+    @Test
+    fun centerCropBoundsMatchSurfaceAspect() {
+        val render = AnimatedWallpaperPolicy.resolveRenderSize(
+            surfaceWidth = 1080,
+            surfaceHeight = 1920,
+            quality = AnimatedWallpaperQuality.BALANCED,
+        )
+        val crop = AnimatedWallpaperMedia.centerCropBounds(
+            sourceWidth = 1920,
+            sourceHeight = 1080,
+            targetWidth = render.width,
+            targetHeight = render.height,
+        )
+        val cropWidth = crop.right - crop.left
+        val cropHeight = crop.bottom - crop.top
+        assertTrue(cropWidth > 0)
+        assertTrue(cropHeight > 0)
+        assertEquals(
+            render.width.toDouble() / render.height.toDouble(),
+            cropWidth.toDouble() / cropHeight.toDouble(),
+            0.02,
+        )
+        assertEquals(
+            AnimatedWallpaperRect(0, 0, 0, 0),
+            AnimatedWallpaperMedia.centerCropBounds(0, 0, 0, 0),
+        )
+    }
 }
